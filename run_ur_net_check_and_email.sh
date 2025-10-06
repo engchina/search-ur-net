@@ -16,11 +16,25 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+# 加载.env文件中的配置
+load_env_config() {
+    if [[ -f ".env" ]]; then
+        # 读取.env文件中的DEFAULT_TO_ADDR
+        local env_email=$(grep "^DEFAULT_TO_ADDR=" .env | cut -d'=' -f2)
+        if [[ -n "$env_email" ]]; then
+            DEFAULT_EMAIL="$env_email"
+        fi
+    fi
+}
+
 # 默认参数
-DEFAULT_EMAIL="xin.b.zhang@oracle.com"
+DEFAULT_EMAIL="your_email@example.com"  # 将被.env文件覆盖
 DEFAULT_DELAY="2.0"
 DEFAULT_FILE="urls.txt"
 DEFAULT_RESULTS_DIR="results"
+
+# 加载环境配置
+load_env_config
 
 # 初始化变量
 EMAIL="$DEFAULT_EMAIL"
