@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  ur-net-checker:
+    build: .
+    container_name: ur-net-checker
+    volumes:
+      # 挂载结果目录到主机
+      - ./results:/app/results
+      # 挂载配置文件
+      - ./.env:/app/.env:ro
+      - ./urls.txt:/app/urls.txt:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DISPLAY=:99
+    # 如果需要网络访问，可以使用 host 网络模式
+    # network_mode: host
+    
+    # 默认命令：运行房屋检查
+    command: ["python", "ur_net_batch_property_checker.py", "-f", "urls.txt", "-d", "2.0"]
+    
+    # 可选：设置资源限制
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
+
+  # 可选：邮件发送服务（如果需要独立运行）
+  ur-net-email:
+    build: .
+    container_name: ur-net-email
+    volumes:
+      - ./results:/app/results:ro
+      - ./.env:/app/.env:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: ["python", "ur_net_email_sender.py"]
+    profiles:
+      - email-only
+    depends_on:
+      - ur-net-checker
