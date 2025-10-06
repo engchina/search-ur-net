@@ -137,14 +137,24 @@ run_checker() {
     if "${docker_cmd[@]}" >> "$LOG_FILE" 2>&1; then
         log "INFO" "房屋检查完成"
         
+        # 等待一下确保文件写入完成
+        sleep 1
+        
         # 显示最新的结果文件
         local latest_result=$(ls -t "$RESULTS_DIR"/ur_net_results_*.json 2>/dev/null | head -1)
         if [[ -n "$latest_result" ]]; then
             log "INFO" "结果文件: $latest_result"
             
-            # 检查结果文件大小
-            local file_size=$(stat -f%z "$latest_result" 2>/dev/null || stat -c%s "$latest_result" 2>/dev/null || echo "0")
+            # 检查结果文件大小（Linux兼容）
+            local file_size=$(stat -c%s "$latest_result" 2>/dev/null || echo "0")
             log "INFO" "结果文件大小: ${file_size} bytes"
+            
+            # 验证文件内容不为空
+            if [[ "$file_size" -gt 0 ]]; then
+                log "INFO" "结果文件生成成功"
+            else
+                log "WARN" "结果文件为空"
+            fi
         else
             log "WARN" "未找到结果文件"
         fi
@@ -158,7 +168,8 @@ run_checker() {
 
 # 检查是否需要发送邮件
 should_send_email() {
-    local latest_result="$1"
+    local latest_result_fullpath="$1"
+    local latest_result_basename=$(basename "$latest_result_fullpath")
     
     log "INFO" "检查是否需要发送邮件..."
     
@@ -258,7 +269,7 @@ EOF
         "-v" "$RESULTS_DIR:/app/results:ro"
         "-v" "$temp_script:/app/check_email.py:ro"
         "$PROJECT_NAME"
-        "python" "/app/check_email.py" "$latest_result"
+        "python" "/app/check_email.py" "results/$latest_result_basename"
     )
     
     "${docker_cmd[@]}" > "$output_file" 2>&1
@@ -284,7 +295,8 @@ EOF
 
 # 发送邮件（如果配置了且需要发送）
 send_email_if_needed() {
-    local latest_result="$1"
+    local latest_result_basename="$1"
+    local latest_result_fullpath="$RESULTS_DIR/$latest_result_basename"
     
     # 检查是否配置了邮件
     local email_configured=false
@@ -301,7 +313,7 @@ send_email_if_needed() {
     fi
     
     # 检查是否需要发送邮件
-    if should_send_email "$latest_result"; then
+    if should_send_email "$latest_result_fullpath"; then
         log "INFO" "检测到新的空室物件，开始发送邮件..."
         
         # 获取邮件主题
@@ -314,7 +326,7 @@ send_email_if_needed() {
             "-v" "$RESULTS_DIR:/app/results:ro"
             "-v" "$SCRIPT_DIR/.env:/app/.env:ro"
             "$PROJECT_NAME"
-            "python" "ur_net_email_sender.py" "-j" "$latest_result" "-s" "$subject"
+            "python" "ur_net_email_sender.py" "-j" "$latest_result_basename" "-s" "$subject"
         )
         
         if "${docker_cmd[@]}" >> "$LOG_FILE" 2>&1; then
@@ -361,14 +373,36 @@ main() {
     
     # 运行检查
     if run_checker; then
-        # 获取最新的结果文件
-        local latest_result=$(ls -t "$RESULTS_DIR"/ur_net_results_*.json 2>/dev/null | head -1)
+        # 等待并重试查找最新的结果文件
+        local latest_result=""
+        local retry_count=0
+        local max_retries=5
         
-        if [[ -n "$latest_result" ]]; then
+        while [[ $retry_count -lt $max_retries ]]; do
+            latest_result=$(ls -t "$RESULTS_DIR"/ur_net_results_*.json 2>/dev/null | head -1)
+            
+            if [[ -n "$latest_result" && -f "$latest_result" ]]; then
+                # 检查文件大小确保不为空
+                local file_size=$(stat -c%s "$latest_result" 2>/dev/null || echo "0")
+                if [[ "$file_size" -gt 0 ]]; then
+                    log "INFO" "找到有效结果文件: $latest_result (${file_size} bytes)"
+                    break
+                else
+                    log "WARN" "结果文件为空，等待重试... (${retry_count}/${max_retries})"
+                fi
+            else
+                log "WARN" "未找到结果文件，等待重试... (${retry_count}/${max_retries})"
+            fi
+            
+            retry_count=$((retry_count + 1))
+            sleep 2
+        done
+        
+        if [[ -n "$latest_result" && -f "$latest_result" ]]; then
             # 发送邮件（如果配置了且需要发送）
             send_email_if_needed "$(basename "$latest_result")"
         else
-            log "WARN" "未找到结果文件，跳过邮件发送"
+            log "ERROR" "经过 $max_retries 次重试后仍未找到有效结果文件，跳过邮件发送"
         fi
         
         # 清理旧文件
