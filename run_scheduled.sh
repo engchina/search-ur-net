@@ -406,7 +406,7 @@ send_email_if_needed() {
             "-v" "$RESULTS_DIR:/app/results:ro"
             "-v" "$SCRIPT_DIR/.env:/app/.env:ro"
             "$PROJECT_NAME"
-            "python" "ur_net_email_sender.py" "-j" "$latest_result_basename" "-s" "$subject"
+            "python" "ur_net_email_sender.py" "-j" "/app/results/$latest_result_basename" "-s" "$subject"
         )
         
         if "${docker_cmd[@]}" >> "$LOG_FILE" 2>&1; then
