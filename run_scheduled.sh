@@ -295,19 +295,34 @@ if not os.path.exists(current_file):
     sys.exit(1)
 
 # 查找前一个结果文件
-all_files = glob.glob('results/ur_net_results_*.json')
+results_dir = '/app/results'
+all_files = glob.glob(os.path.join(results_dir, 'ur_net_results_*.json'))
 if len(all_files) <= 1:
-    print('SEND: First run detected')
+    # 第一次运行，检查当前结果是否有空室物件
+    try:
+        with open(current_file, 'r', encoding='utf-8') as f:
+            current_data = json.load(f)
+        current_properties = current_data.get('results', [])
+        has_vacant = any(prop.get('total_vacant', 0) > 0 for prop in current_properties if prop.get('status') == 'success')
+        if has_vacant:
+            print('SEND: First run detected with vacant properties')
+        else:
+            print('SKIP: First run detected but no vacant properties')
+            sys.exit(2)
+    except Exception as e:
+        print(f'ERROR: Failed to check first run results: {e}')
+        sys.exit(1)
     sys.exit(0)
 
 # 排除当前文件，找到最新的前一个文件
-previous_files = [f for f in all_files if f != current_file]
+current_fullpath = os.path.join(results_dir, os.path.basename(current_file))
+previous_files = [f for f in all_files if f != current_fullpath]
 if not previous_files:
     print('SEND: No previous results found')
     sys.exit(0)
 
 previous_file = max(previous_files, key=os.path.getmtime)
-result = compare_results(current_file, previous_file)
+result = compare_results(current_fullpath, previous_file)
 
 if result.get('error'):
     print(f'ERROR: {result["error"]}')
@@ -379,7 +394,7 @@ send_email_if_needed() {
     
     # 检查是否需要发送邮件
     if should_send_email "$latest_result_fullpath"; then
-        log "INFO" "检测到新的空室物件，开始发送邮件..."
+        log "INFO" "检测到需要发送邮件的条件，开始发送邮件..."
         
         # 获取邮件主题
         local subject="UR-NET房屋检查结果 - $(date '+%Y-%m-%d %H:%M')"
