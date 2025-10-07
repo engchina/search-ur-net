@@ -17,6 +17,7 @@ PROJECT_NAME="ur-net-checker"
 CONTAINER_NAME="${PROJECT_NAME}-scheduled"
 LOG_DIR="$SCRIPT_DIR/logs"
 RESULTS_DIR="$SCRIPT_DIR/results"
+LOCK_FILE="$SCRIPT_DIR/.ur_net_scheduled.lock"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 LOG_FILE="$LOG_DIR/scheduled_run_$TIMESTAMP.log"
 
@@ -57,6 +58,46 @@ log() {
     esac
 }
 
+# 获取进程锁
+acquire_lock() {
+    # 检查锁文件是否存在
+    if [[ -f "$LOCK_FILE" ]]; then
+        local lock_pid=$(cat "$LOCK_FILE" 2>/dev/null)
+        
+        # 检查进程是否仍在运行
+        if [[ -n "$lock_pid" ]] && kill -0 "$lock_pid" 2>/dev/null; then
+            log "WARN" "检测到另一个实例正在运行 (PID: $lock_pid)"
+            log "INFO" "跳过本次执行，避免重复运行"
+            exit 0
+        else
+            log "WARN" "发现过期的锁文件，清理中..."
+            rm -f "$LOCK_FILE"
+        fi
+    fi
+    
+    # 创建锁文件
+    echo $$ > "$LOCK_FILE"
+    if [[ $? -eq 0 ]]; then
+        log "INFO" "成功获取进程锁 (PID: $$)"
+    else
+        log "ERROR" "无法创建锁文件: $LOCK_FILE"
+        exit 1
+    fi
+}
+
+# 释放进程锁
+release_lock() {
+    if [[ -f "$LOCK_FILE" ]]; then
+        local lock_pid=$(cat "$LOCK_FILE" 2>/dev/null)
+        if [[ "$lock_pid" == "$$" ]]; then
+            rm -f "$LOCK_FILE"
+            log "INFO" "已释放进程锁"
+        else
+            log "WARN" "锁文件PID不匹配，可能被其他进程修改"
+        fi
+    fi
+}
+
 # 清理函数
 cleanup() {
     log "INFO" "开始清理容器..."
@@ -66,6 +107,9 @@ cleanup() {
         docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
         log "INFO" "已清理容器: $CONTAINER_NAME"
     fi
+    
+    # 释放进程锁
+    release_lock
 }
 
 # 检查 Docker 环境
@@ -78,6 +122,27 @@ check_docker() {
     if ! docker info &> /dev/null; then
         log "ERROR" "Docker 服务未运行或当前用户无权限访问 Docker"
         exit 1
+    fi
+    
+    # 检查是否有同名容器正在运行
+    if docker ps --format "table {{.Names}}" | grep -q "^${CONTAINER_NAME}$"; then
+        log "WARN" "检测到同名容器正在运行: $CONTAINER_NAME"
+        log "INFO" "跳过本次执行，避免容器冲突"
+        exit 0
+    fi
+    
+    # 检查是否有同名的邮件发送容器正在运行
+    if docker ps --format "table {{.Names}}" | grep -q "^${CONTAINER_NAME}-email$"; then
+        log "WARN" "检测到邮件发送容器正在运行: ${CONTAINER_NAME}-email"
+        log "INFO" "跳过本次执行，避免容器冲突"
+        exit 0
+    fi
+    
+    # 检查是否有同名的检查容器正在运行
+    if docker ps --format "table {{.Names}}" | grep -q "^${CONTAINER_NAME}-check$"; then
+        log "WARN" "检测到检查容器正在运行: ${CONTAINER_NAME}-check"
+        log "INFO" "跳过本次执行，避免容器冲突"
+        exit 0
     fi
     
     log "INFO" "Docker 环境检查通过"
@@ -357,6 +422,9 @@ cleanup_old_logs() {
 
 # 主执行函数
 main() {
+    # 首先尝试获取进程锁
+    acquire_lock
+    
     log "INFO" "=========================================="
     log "INFO" "UR-NET房屋检查系统 - 定时执行开始"
     log "INFO" "执行时间: $(date)"
