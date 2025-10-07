@@ -904,7 +904,11 @@ class URNetBatchChecker:
         """
         if not output_path:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            output_path = f"ur_net_check_results_{timestamp}.{output_format}"
+            # 确保输出目录存在
+            results_dir = "/app/results" if os.path.exists("/app") else "results"
+            os.makedirs(results_dir, exist_ok=True)
+            # 使用与 shell 脚本匹配的文件名格式
+            output_path = os.path.join(results_dir, f"ur_net_results_{timestamp}.{output_format}")
         
         print(f"💾 結果を保存中: {output_path}")
         
