@@ -298,7 +298,7 @@ if not os.path.exists(current_file):
 results_dir = '/app/results'
 all_files = glob.glob(os.path.join(results_dir, 'ur_net_results_*.json'))
 if len(all_files) <= 1:
-    # 第一次运行，检查当前结果是否有空室物件
+    # 第一次运行，100%发送邮件
     try:
         with open(current_file, 'r', encoding='utf-8') as f:
             current_data = json.load(f)
@@ -307,12 +307,12 @@ if len(all_files) <= 1:
         if has_vacant:
             print('SEND: First run detected with vacant properties')
         else:
-            print('SKIP: First run detected but no vacant properties')
-            sys.exit(2)
+            print('SEND: First run detected - sending email regardless of vacant properties')
+        # 第一次运行总是发送邮件
+        sys.exit(0)
     except Exception as e:
         print(f'ERROR: Failed to check first run results: {e}')
         sys.exit(1)
-    sys.exit(0)
 
 # 排除当前文件，找到最新的前一个文件
 current_fullpath = os.path.join(results_dir, os.path.basename(current_file))
