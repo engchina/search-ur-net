@@ -248,6 +248,9 @@ import glob
 
 def compare_results(current_file, previous_file):
     try:
+        print(f'DEBUG: Comparing current file: {current_file}', file=sys.stderr)
+        print(f'DEBUG: Comparing previous file: {previous_file}', file=sys.stderr)
+        
         with open(current_file, 'r', encoding='utf-8') as f:
             current_data = json.load(f)
         with open(previous_file, 'r', encoding='utf-8') as f:
@@ -257,11 +260,17 @@ def compare_results(current_file, previous_file):
         current_properties = current_data.get('results', [])
         previous_properties = previous_data.get('results', [])
         
+        print(f'DEBUG: Current properties count: {len(current_properties)}', file=sys.stderr)
+        print(f'DEBUG: Previous properties count: {len(previous_properties)}', file=sys.stderr)
+        
         # 检查是否有新的空室物件
         current_vacant = {prop['url']: prop.get('total_vacant', 0) 
                          for prop in current_properties if prop.get('total_vacant', 0) > 0}
         previous_vacant = {prop['url']: prop.get('total_vacant', 0) 
                           for prop in previous_properties if prop.get('total_vacant', 0) > 0}
+        
+        print(f'DEBUG: Current vacant properties: {len(current_vacant)}', file=sys.stderr)
+        print(f'DEBUG: Previous vacant properties: {len(previous_vacant)}', file=sys.stderr)
         
         # 检查新增的空室物件
         new_properties = set(current_vacant.keys()) - set(previous_vacant.keys())
@@ -272,6 +281,9 @@ def compare_results(current_file, previous_file):
             if prop_url in previous_vacant:
                 if current_vacant[prop_url] > previous_vacant[prop_url]:
                     increased_properties.append(prop_url)
+        
+        print(f'DEBUG: New properties: {len(new_properties)}', file=sys.stderr)
+        print(f'DEBUG: Increased properties: {len(increased_properties)}', file=sys.stderr)
         
         has_new_properties = len(new_properties) > 0 or len(increased_properties) > 0
         
@@ -297,31 +309,27 @@ if not os.path.exists(current_file):
 # 查找前一个结果文件
 results_dir = '/app/results'
 all_files = glob.glob(os.path.join(results_dir, 'ur_net_results_*.json'))
+
+print(f'DEBUG: Found {len(all_files)} result files: {[os.path.basename(f) for f in all_files]}', file=sys.stderr)
+
 if len(all_files) <= 1:
-    # 第一次运行，100%发送邮件
-    try:
-        with open(current_file, 'r', encoding='utf-8') as f:
-            current_data = json.load(f)
-        current_properties = current_data.get('results', [])
-        has_vacant = any(prop.get('total_vacant', 0) > 0 for prop in current_properties if prop.get('status') == 'success')
-        if has_vacant:
-            print('SEND: First run detected with vacant properties')
-        else:
-            print('SEND: First run detected - sending email regardless of vacant properties')
-        # 第一次运行总是发送邮件
-        sys.exit(0)
-    except Exception as e:
-        print(f'ERROR: Failed to check first run results: {e}')
-        sys.exit(1)
+    print('SEND: First run detected')
+    sys.exit(0)
+
+# 排除当前文件，找到最新的前一个文件（按修改时间）
+current_basename = os.path.basename(current_file)
+current_fullpath = os.path.join(results_dir, current_basename)
+
+print(f'DEBUG: Current file: {current_basename}', file=sys.stderr)
 
 # 排除当前文件，找到最新的前一个文件
-current_fullpath = os.path.join(results_dir, os.path.basename(current_file))
-previous_files = [f for f in all_files if f != current_fullpath]
+previous_files = [f for f in all_files if os.path.basename(f) != current_basename]
 if not previous_files:
     print('SEND: No previous results found')
     sys.exit(0)
 
 previous_file = max(previous_files, key=os.path.getmtime)
+print(f'DEBUG: Previous file selected: {os.path.basename(previous_file)}', file=sys.stderr)
 result = compare_results(current_fullpath, previous_file)
 
 if result.get('error'):
@@ -352,11 +360,16 @@ EOF
         "python" "/app/check_email.py" "results/$latest_result_basename"
     )
     
+    log "DEBUG" "执行邮件检查命令: ${docker_cmd[*]}"
     "${docker_cmd[@]}" > "$output_file" 2>&1
     local exit_code=$?
     
     # 读取输出
     local check_result=$(cat "$output_file")
+    
+    # 记录详细的调试信息
+    log "DEBUG" "邮件检查退出码: $exit_code"
+    log "DEBUG" "邮件检查输出: $check_result"
     
     # 清理临时文件
     rm -f "$temp_script" "$output_file"
