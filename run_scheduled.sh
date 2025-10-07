@@ -192,9 +192,12 @@ run_checker() {
         docker_cmd+=("-v" "$SCRIPT_DIR/.env:/app/.env:ro")
     fi
     
+    # 生成输出文件名（与主脚本保持一致）
+    local output_filename="ur_net_results_${TIMESTAMP}.json"
+    
     # 添加镜像和命令
     docker_cmd+=("$PROJECT_NAME")
-    docker_cmd+=("python" "ur_net_batch_property_checker.py" "-f" "urls.txt" "-d" "2.0")
+    docker_cmd+=("python" "ur_net_batch_property_checker.py" "-c" "urls.txt" "-d" "2.0" "-o" "json" "-p" "results/$output_filename" "--verbose")
     
     log "DEBUG" "执行命令: ${docker_cmd[*]}"
     
@@ -205,10 +208,11 @@ run_checker() {
         # 等待一下确保文件写入完成
         sleep 1
         
-        # 显示最新的结果文件
-        local latest_result=$(ls -t "$RESULTS_DIR"/ur_net_results_*.json 2>/dev/null | head -1)
-        if [[ -n "$latest_result" ]]; then
-            log "INFO" "结果文件: $latest_result"
+        # 显示指定的结果文件
+        local expected_result="$RESULTS_DIR/$output_filename"
+        if [[ -f "$expected_result" ]]; then
+            log "INFO" "结果文件: $expected_result"
+            local latest_result="$expected_result"
             
             # 检查结果文件大小（Linux兼容）
             local file_size=$(stat -c%s "$latest_result" 2>/dev/null || echo "0")
@@ -221,7 +225,14 @@ run_checker() {
                 log "WARN" "结果文件为空"
             fi
         else
-            log "WARN" "未找到结果文件"
+            log "WARN" "未找到指定的结果文件: $expected_result"
+            # 尝试查找最新的结果文件作为备选
+            local latest_result=$(ls -t "$RESULTS_DIR"/ur_net_results_*.json 2>/dev/null | head -1)
+            if [[ -n "$latest_result" ]]; then
+                log "INFO" "找到备选结果文件: $latest_result"
+            else
+                log "WARN" "未找到任何结果文件"
+            fi
         fi
         
         return 0
@@ -469,13 +480,20 @@ main() {
     
     # 运行检查
     if run_checker; then
-        # 等待并重试查找最新的结果文件
+        # 等待并重试查找指定的结果文件
+        local expected_output_file="$RESULTS_DIR/ur_net_results_${TIMESTAMP}.json"
         local latest_result=""
         local retry_count=0
         local max_retries=5
         
         while [[ $retry_count -lt $max_retries ]]; do
-            latest_result=$(ls -t "$RESULTS_DIR"/ur_net_results_*.json 2>/dev/null | head -1)
+            # 优先查找指定的输出文件
+            if [[ -f "$expected_output_file" ]]; then
+                latest_result="$expected_output_file"
+            else
+                # 备选：查找最新的结果文件
+                latest_result=$(ls -t "$RESULTS_DIR"/ur_net_results_*.json 2>/dev/null | head -1)
+            fi
             
             if [[ -n "$latest_result" && -f "$latest_result" ]]; then
                 # 检查文件大小确保不为空
